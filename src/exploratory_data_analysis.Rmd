@@ -1,0 +1,193 @@
+---
+title: "GeckoQ data exploration and preprocessing"
+date: "`r Sys.Date()`"
+output: pdf_document
+toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(reticulate)
+
+```
+
+# Target variable
+
+\begin{itemize}
+  \item log\_pSat\_Pa: Logarithmic saturation vapour pressure of the molecule calculated by COSMOtherm (Pa).
+\end{itemize}
+
+# Interpretable features
+
+\begin{enumerate}
+   \item MW: The molecular weight of the molecule (g/mol).
+   \item NumOfAtoms: The number of atoms in the molecule.
+   \item NumOfC: The number of carbon atoms in the molecule.
+   \item NumOfO: The number of oxygen atoms in the molecule.
+   \item NumOfN: The number of nitrogen atoms in the molecule.
+   \item NumHBondDonors: The number of hydrogen bond donors in the molecule, i.e. hydrogens bound to oxygen.
+   \item parentspecies: Either “decane”, “toluene”, “apin” for alpha-pinene or a combination of these connected by an underscore to indicate ambiguous descent. In 243 cases, the parent species is “None” because it was not possible to retrieve it.
+   \item NumOfConf: The number of stable conformers found and successfully calculated by COSMOconf.
+   \item NumOfConfUsed: The number of conformers used to calculate the thermodynamic properties.
+   \item C = C (non-aromatic): The number of non-aromatic C=C bounds found in the molecule.
+   \item C = C-C = O in non-aromatic ring: The number of “C=C-C=O” structures found in non-aromatic rings in the molecule.
+   \item hydroxyl (alkyl): The number of the alkylic hydroxyl groups found in the molecule.
+   \item aldehyde: The number of aldehyde groups in the molecule.
+   \item ketone: The number of ketone groups in the molecule.
+   \item carboxylic acid: The number of carboxylic acid groups in the molecule.
+   \item ester: The number of ester groups in the molecule.
+   \item ether (alicyclic): The number of alicyclic ester groups in the molecule.
+   \item nitrate: The number of alicyclic nitrate groups in the molecule.
+   \item nitro: The number of nitro ester groups in the molecule.
+   \item aromatic hydroxyl: The number of alicyclic aromatic hydroxyl groups in the molecule.
+   \item carbonylperoxynitrate: The number of carbonylperoxynitrate groups in the molecule.
+   \item peroxide: The number of peroxide groups in the molecule.
+   \item hydroperoxide: The number of hydroperoxide groups in the molecule.
+   \item carbonylperoxyacid: The number of carbonylperoxyacid groups found in the molecule
+   \item nitroester: The number of nitroester groups found in the molecule
+\end{enumerate}
+
+# Variables types and unique values
+
+```{python, message=FALSE, error=FALSE, warning=FALSE}
+import pandas as pd
+
+train = pd.read_csv('../data/train.csv')
+
+train.dtypes
+
+for column in train.iloc[:, 3:].columns:
+  print(train[column].unique())
+
+```
+
+# Transformations
+
+```{python, message=FALSE, error=FALSE, warning=FALSE}
+import numpy as np
+
+train['parentspecies'].unique()
+
+mapping_dictionary = {
+'toluene' : 1,
+'apin' : 2,
+'decane' : 3,
+'apin_toluene' : 4,
+'apin_decane' : 5,
+'decane_toluene' : 6,
+'apin_decane_toluene' : 7
+}
+
+train['parentspecies'] = train['parentspecies'].map(mapping_dictionary)
+
+```
+
+# Distributions
+
+```{python, message=FALSE, error=FALSE, warning=FALSE}
+import matplotlib.pyplot as plt
+
+plt.clf()
+train.iloc[:, 1:].hist(bins=30, figsize=(15, 10)) 
+plt.tight_layout() 
+plt.show()
+  
+```
+
+# Correlation matrix
+
+```{python, message=FALSE, error=FALSE, warning=FALSE}
+import seaborn as sns
+
+correlation_matrix = round(train.iloc[:, 1:].corr(),3)
+correlation_matrix['log_pSat_Pa']
+
+
+plt.figure(figsize=(12, 10))
+plt.clf()
+sns.heatmap(correlation_matrix, annot=False, cmap='coolwarm', linewidths=0.5) 
+plt.xticks(rotation=45, ha='right') 
+plt.yticks(rotation=0) 
+plt.tight_layout()
+plt.show()
+
+```
+
+# Missing values
+
+```{python, message=FALSE, error=FALSE, warning=FALSE}
+
+train.isna().sum()
+
+# check if variable with missing data ('parentspecies') is an influential variable?
+train['log_pSat_Pa'].corr(train['parentspecies'])
+
+# save the train_complete_cases
+train_complete_cases = train.dropna()
+train_complete_cases.to_csv('../data/train_compelete_cases.csv', index=False)
+
+```
+
+# Missing values imputation
+
+```{python, message=FALSE, error=FALSE, warning=FALSE}
+from sklearn.ensemble import RandomForestClassifier
+
+# impute missing values of 'parentspecies' using RF
+non_missing_data = train[train['parentspecies'].notna()] 
+missing_data = train[train['parentspecies'].isna()]
+
+imputer = RandomForestClassifier(n_estimators=100, random_state=40) 
+imputer.fit(non_missing_data.iloc[:, 1:], non_missing_data['parentspecies'])
+predictions = imputer.predict(missing_data.iloc[:, 1:]) 
+train_imputed = train.copy()
+train_imputed.loc[train_imputed['parentspecies'].isna(), 'parentspecies'] = predictions
+
+train['parentspecies'].value_counts()
+train_imputed['parentspecies'].value_counts()
+
+# save the train_imputed
+train_imputed.to_csv('../data/train_imputed.csv', index=False)
+
+```
+
+# PCI
+
+```{python, message=FALSE, error=FALSE, warning=FALSE}
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+# scale data to have mean=0 and sd=1
+scaler = StandardScaler(with_std=True, with_mean=True)
+train_imputed_reduced = train_imputed.iloc[:, 1:]
+train_imputed_scaled = scaler.fit_transform(train_imputed_reduced)
+
+# perform pca
+pca = PCA(n_components=3)
+train_imputed_pca = pca.fit_transform(train_imputed_scaled)
+pca_df = pd.DataFrame(data=train_imputed_pca, columns=['PC1', 'PC2', 'PC3'])
+
+pca.explained_variance_ratio_
+
+```
+
+# Summary of the exploratory data analysis
+
+The train data contains 26,637 observations and 27 variables. All variables are numeric except for 'parentspecies', which is a 7-level categorical variable. Among the numeric variables, there are 4 floats and 11 integers.
+
+Firstly, I encoded the levels of 'parentspecies' from 1 to 7 to convert it into a numerical variable.
+
+Next, I examined the distribution of all variables, excluding the ID. The target variable, 'log_pSat_Pa', has a perfectly symmetric distribution indicating a normal distribution. The other variables exhibit skewed distributions to varying degrees.
+
+I examined the correlation between variables using a correlation matrix. Focusing on the correlation between the target variable and all other variables, it was found that 'log_pSat_Pa' shows the strongest correlation with 'NumHBondDonors' and 'NumOfConf', with scores of -0.689 and -0.514, respectively. Other correlation scores are listed in number and illustrated in a heatmap plot.
+
+Regarding missing values, 210 NaNs are observed in the dataset, all within 'parentspecies'. There are various approaches to handle missingness, including keeping them, deleting them, imputing them with the variable's mean or mode, or estimating them using predictive modeling. Before deciding on an approach, I checked the correlation between the target variable and 'parentspecies' to see if 'parentspecies' is an important variable for our project. The correlation score is 0.006, indicating that 'parentspecies' is not an influential feature. Despite this, I used a Random Forest Classifier to predict the NaN values. As a result, 208 missing values were predicted to be 1, corresponding to the first category: 'toluene', and 2 missing values were predicted to be 2, corresponding to the second category: 'apin'.
+
+For further analysis and modeling, I stored three versions of the train data: the first is the original train data, the second is 'train_complete_cases' obtained by deleting rows with missing values (210 rows), and 'train_imputed' where missing values are replaced with predictions from the Random Forest classifier. To ensure the best predictions for our project, we can use all three datasets and compare their performances. It is worth mentioning that some regressors do not accept missing values in the data at all, so we might need to use either 'train_complete_cases' or 'train_imputed' at some point.
+
+I also performed a preliminary PCA, an unsupervised machine learning method, to further explore patterns in the data. Since PCA does not work on data with NaNs, I used the 'train_imputed' data for this task. Specifying 3 principal components, the results show that PC1, PC2, and PC3 explain 16%, 12%, and 10% of the variance in the data, respectively. The PCA analysis will be completed by the next team meeting.
+
+
+
+
