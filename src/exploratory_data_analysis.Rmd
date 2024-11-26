@@ -81,6 +81,10 @@ mapping_dictionary = {
 
 train['parentspecies'] = train['parentspecies'].map(mapping_dictionary)
 
+# save the transformed train data
+train_transformed.to_csv('../data/train_transformed.csv', index=False)
+
+
 ```
 
 # Distributions
