@@ -1,0 +1,248 @@
+---
+title: "IML Group 20 Project AHH"
+author: "Andrew Armstrong"
+date: "2024-11-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(max.print = 1e6)
+```
+
+## Intro
+
+This file contains the initial exploration into linear regression, including polynomial regression, multivariate regression, lasso, transformations, and stepwise selections. 
+
+## Generic model fit
+
+First we'll fit a model that just has every predictor as is (this will not be very accurate probably). I will specifically make the variables which should be treated as categorical as categorical (anything with the number of unique entries <= 10) and evaluate the accuracy.
+
+```{r cars}
+setwd("~/R Files/IML2024/Exercises/Exercise set 1")
+training_data <- read.csv("train.csv")
+#cut the columns deemed unnecessary initially
+training_data <- subset(training_data, select = -c(ID,parentspecies))
+training_data[] <- lapply(training_data, function(x) {
+  if(length(unique(x))<11) as.factor(x) else x
+})
+```
+
+
+
+```{r}
+library(dplyr)
+library(glmnet)
+initial_model <- lm(log_pSat_Pa ~ .,training_data)
+initial_model %>% summary()
+### accuracy
+initial_MSE <- mean((training_data$log_pSat_Pa - predict(initial_model))^2)
+#dummy model accuracy:
+dummy_MSE <- mean((training_data$log_pSat_Pa-mean(training_data$log_pSat_Pa))^2)
+initial_MSE
+dummy_MSE
+```
+This actually doesn't look terrible? but we're probably violating some assumptions plus the model doesn't have all significant values. Let's do a lasso/ridge cross validation on this to see how that would perform:
+
+
+```{r}
+x <- model.matrix(log_pSat_Pa ~ ., data = training_data)[, -1]
+y <- training_data$log_pSat_Pa
+lasso_model <- cv.glmnet(x, y, alpha = 1, nfolds = 5)
+lasso_coefficients <- coef(lasso_model, s = "lambda.min")
+print(lasso_coefficients)
+lasso_MSE <- mean((training_data$log_pSat_Pa - predict(lasso_model, newx = x, s = "lambda.min"))^2)
+
+ridge_model <- cv.glmnet(x, y, alpha = 0, nfolds = 5)
+ridge_coefficients <- coef(ridge_model, s = "lambda.min")
+print(ridge_coefficients)
+ridge_MSE <- mean((training_data$log_pSat_Pa - predict(ridge_model, newx = x, s = "lambda.min"))^2)
+#Elastic net method
+ELN_model <- cv.glmnet(x, y, alpha = .5, nfolds = 5)
+ELN_coefficients <- coef(ELN_model, s = "lambda.min")
+print(ELN_coefficients)
+ELN_MSE <- mean((training_data$log_pSat_Pa - predict(ELN_model, newx = x, s = "lambda.min"))^2)
+```
+
+```{r}
+lasso_MSE
+ridge_MSE
+ELN_MSE
+```
+
+These results seem to indicate that there are indeed some variables that can be excluded from the model like MW, though with the categorical variables this is harder to know what to do given that it's an all or nothing situation (unless we reduce the categories).
+
+The MSE does not go up signficantly from our initial model which is good, but I think it does indicate a better model might exist somewhere.
+
+### Variable Transformation
+
+Let's look at our histograms and variables more closely to see if any need transformation:
+
+```{r}
+df <- training_data
+par(mfrow = c(ceiling(sqrt(ncol(df))), ceiling(sqrt(ncol(df))))) # Set layout for plots
+par(mar = c(2, 2, 2, 2))
+lapply(df, function(column) {
+  if (is.numeric(column)) {
+    hist(column, main = colnames(df)[which(sapply(df, identical, column))], 
+         xlab = "Values", 
+         ylab = "Frequency", 
+         col = "lightblue", 
+         border = "white")
+  }
+})
+par(mfrow = c(1, 1))
+
+```
+
+NumOfConfUsed and NumOfConf do not appear to be very normal in their histograms, which means we can transform them. Let's use BoxCox for this transformation:
+
+
+```{r}
+library(MASS)
+boxcox_result <- boxcox(lm(NumOfConf ~ 1, data = training_data))
+lambda_Conf <- boxcox_result$x[which.max(boxcox_result$y)]
+boxcox_result <- boxcox(lm(NumOfConfUsed ~ 1, data = training_data))
+lambda_Used <- boxcox_result$x[which.max(boxcox_result$y)]
+training_data$NumOfConf <- (training_data$NumOfConf^lambda_Conf - 1) / lambda_Conf
+training_data$NumOfConfUsed <- (training_data$NumOfConfUsed^lambda_Used - 1) / lambda_Used
+```
+
+```{r}
+hist(training_data$NumOfConf)
+hist(training_data$NumOfConfUsed)
+qqnorm(training_data$NumOfConf)
+qqnorm(training_data$NumOfConfUsed)
+```
+
+NumOfConf looks much more normal but NumOfConfUsed much less so. If we can not use NumOfConfUsed (or maybe turn it categorical) we might have a better model here.
+
+
+## Stepwise Model selection?
+
+Choosing the factors to include/exclude can be based on the lasso/ridge/ELN models above, but we can also do some individual plots to see what should have a relationship with log_pSat_Pa in some way (it may not be fully linear but if something happens then we can include it and if nothing happens then we can drop it).
+
+### Plot of everything
+
+```{r}
+for(i in 2:25){
+  plot(training_data[,i],training_data$log_pSat_Pa, xlab = colnames(training_data)[i])
+}
+```
+
+The variables that have a (somewhat linear) or maybe polynomial relationship with log_pSat_Pa are:
+MW, NumOfAtoms, NumOfO, NumOfC, NumOfConf (transformed),NumHBondDonors, hydroxyl..alkyl,aldehyde, ketone,carboxylic.acid, carbonylperoxynitrate, hydroperoxide, nitroester, carbonylperoxyacid
+
+The variables that have some change in variance, but maybe not an actual relationship, are:
+NumOfN, NumOfConfUsed, C.C..non.aromatic., C.C.C.O.in.non.aromatic.ring, ester, ester..alicyclic, nitrate, nitro, aromatic.hydroxyl, peroxide
+
+
+Some of these categorical variables are indicating that some of their higher values can possibly be consolidated into smaller categories. Nitroester for example, suggests that there's a different distribution for values of 1 or greater. We can explore this later possibly?
+
+I'm going to fit a linear model of poly order two with interactions for the variables we identified as probably having a most obvious relationship with log_pSat_Pa. We can think to include the other ones later but right now they dont indicate much of an obvious relationship. I will however include the transformed NumOfConfUsed as that in principle feels like it should interact with NumOfConf. This will be computationally expensive but from this model we can eliminate unnecessary terms with stepwise selection.
+
+
+```{r}
+subset_model <- lm(log_pSat_Pa ~
+                     (MW + NumOfAtoms + NumOfO + NumOfC + NumOfConf + NumOfConfUsed + NumHBondDonors + hydroxyl..alkyl. + aldehyde + ketone +carboxylic.acid + carbonylperoxynitrate + hydroperoxide + nitroester + carbonylperoxyacid)^2, training_data)
+```
+
+```{r}
+subset_model %>% summary()
+subset_MSE <- mean((training_data$log_pSat_Pa - predict(subset_model))^2)
+#stepwise_model <- step(subset_model, 
+#                       scope = list(lower = ~1, upper = subset_model),
+#                       direction = "backward")
+#stepwise_model %>% summary()
+```
+
+Polynomial for linear objects fit (except NumOfConfUsed)
+
+```{r}
+subset_poly_model <- lm(log_pSat_Pa ~
+                     (MW + I(MW^2) + NumOfAtoms + I(NumOfAtoms^2) + NumOfO + I(NumOfO^2) + NumOfC + NumOfConf + I(NumOfConf^2) + NumOfConfUsed + NumHBondDonors + hydroxyl..alkyl. + aldehyde + ketone +carboxylic.acid + carbonylperoxynitrate + hydroperoxide + nitroester + carbonylperoxyacid)^2, training_data)
+subset_poly_model %>% summary()
+subset_poly_MSE <- mean((training_data$log_pSat_Pa - predict(subset_poly_model))^2)
+#stepwise_poly_model <- step(subset_poly_model, 
+#                       scope = list(lower = ~1, upper = subset_poly_model),
+#                       direction = "backward")
+#stepwise_poly_model %>% summary()
+```
+
+```{r}
+#step_MSE <- mean((training_data$log_pSat_Pa - predict(stepwise_model))^2)
+#step_poly_MSE <- mean((training_data$log_pSat_Pa - predict(stepwise_poly_model))^2)
+
+```
+
+
+## Lasso, Ridge, ELN with these:
+
+```{r}
+x_subset <- model.matrix(log_pSat_Pa ~ (MW + NumOfAtoms + NumOfO + NumOfC + NumOfConf + NumOfConfUsed + NumHBondDonors + hydroxyl..alkyl. + aldehyde + ketone +carboxylic.acid + carbonylperoxynitrate + hydroperoxide + nitroester + carbonylperoxyacid)^2, data = training_data)[, -1]
+y <- training_data$log_pSat_Pa
+lasso_subset_model <- cv.glmnet(x_subset, y, alpha = 1, nfolds = 5)
+lasso_coefficients <- coef(lasso_subset_model, s = "lambda.min")
+print(lasso_coefficients)
+lasso_subset_MSE <- mean((training_data$log_pSat_Pa - predict(lasso_subset_model, newx = x_subset, s = "lambda.min"))^2)
+
+ridge_subset_model <- cv.glmnet(x_subset, y, alpha = 0, nfolds = 5)
+ridge_coefficients <- coef(ridge_subset_model, s = "lambda.min")
+print(ridge_coefficients)
+ridge_subset_MSE <- mean((training_data$log_pSat_Pa - predict(ridge_subset_model, newx = x_subset, s = "lambda.min"))^2)
+#Elastic net method
+ELN_subset_model <- cv.glmnet(x_subset, y, alpha = .5, nfolds = 5)
+ELN_coefficients <- coef(ELN_subset_model, s = "lambda.min")
+print(ELN_coefficients)
+ELN_subset_MSE <- mean((training_data$log_pSat_Pa - predict(ELN_subset_model, newx = x_subset, s = "lambda.min"))^2)
+```
+
+
+
+
+```{r}
+x_poly <- model.matrix(log_pSat_Pa ~ (MW + I(MW^2) + NumOfAtoms + I(NumOfAtoms^2) + NumOfO + I(NumOfO^2) + NumOfC + NumOfConf + I(NumOfConf^2) + NumOfConfUsed + NumHBondDonors + hydroxyl..alkyl. + aldehyde + ketone +carboxylic.acid + carbonylperoxynitrate + hydroperoxide + nitroester + carbonylperoxyacid)^2, data = training_data)[, -1]
+y <- training_data$log_pSat_Pa
+lasso_poly_model <- cv.glmnet(x_poly, y, alpha = 1, nfolds = 5)
+lasso_coefficients <- coef(lasso_poly_model, s = "lambda.min")
+print(lasso_coefficients)
+lasso_poly_MSE <- mean((training_data$log_pSat_Pa - predict(lasso_poly_model, newx = x_poly, s = "lambda.min"))^2)
+
+ridge_poly_model <- cv.glmnet(x_poly, y, alpha = 0, nfolds = 5)
+ridge_coefficients <- coef(ridge_poly_model, s = "lambda.min")
+print(ridge_coefficients)
+ridge_poly_MSE <- mean((training_data$log_pSat_Pa - predict(ridge_poly_model, newx = x_poly, s = "lambda.min"))^2)
+#Elastic net method
+ELN_poly_model <- cv.glmnet(x_poly, y, alpha = .5, nfolds = 5)
+ELN_coefficients <- coef(ELN_poly_model, s = "lambda.min")
+print(ELN_coefficients)
+ELN_poly_MSE <- mean((training_data$log_pSat_Pa - predict(ELN_poly_model, newx = x_poly, s = "lambda.min"))^2)
+```
+```{r}
+#Dummy MSE
+dummy_MSE
+#Initial Model with every predictor (Categorical <= 10 options, no parentspecies)
+initial_MSE
+#Lasso, Ridge, and ELN (elastic net) on initial model
+lasso_MSE
+ridge_MSE
+ELN_MSE
+#Subset model (14 predictors) with all possible interactions
+subset_MSE
+#Subset model (14 predictors) with all interactions AND polynomial terms for some linear variables
+subset_poly_MSE
+#Backward Stepwise Selection: Subset model (14 predictors) with all possible interactions
+#step_MSE
+#Backward Stepwise Selection: Subset model (14 predictors) with all interactions AND polynomial terms for some linear variables
+#step_poly_MSE
+#Lasso,Ridge,ELN Selection: Subset model (14 predictors) with all possible interactions
+lasso_subset_MSE
+ridge_subset_MSE
+ELN_subset_MSE
+#Lasso,Ridge,ELN Selection: Subset model (14 predictors) with all interactions AND polynomial terms for some linear variables
+lasso_poly_MSE
+ridge_poly_MSE
+ELN_poly_MSE
+```
+
+
