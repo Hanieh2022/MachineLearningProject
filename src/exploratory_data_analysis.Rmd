@@ -11,14 +11,15 @@ knitr::opts_chunk$set(echo = TRUE)
 library(reticulate)
 
 ```
+# Exploratory data analysis 
 
-# Target variable
+## Target variable
 
 \begin{itemize}
   \item log\_pSat\_Pa: Logarithmic saturation vapour pressure of the molecule calculated by COSMOtherm (Pa).
 \end{itemize}
 
-# Interpretable features
+## Interpretable features
 
 \begin{enumerate}
    \item MW: The molecular weight of the molecule (g/mol).
@@ -48,7 +49,7 @@ library(reticulate)
    \item nitroester: The number of nitroester groups found in the molecule
 \end{enumerate}
 
-# Variables types and unique values
+## Variables types and unique values
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
 import pandas as pd
@@ -62,7 +63,7 @@ for column in train.iloc[:, 3:].columns:
 
 ```
 
-# Transformations
+## Transformations
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
 import numpy as np
@@ -87,7 +88,7 @@ train_transformed.to_csv('../data/train_transformed.csv', index=False)
 
 ```
 
-# Distributions
+## Distributions
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
 import matplotlib.pyplot as plt
@@ -99,7 +100,7 @@ plt.show()
   
 ```
 
-# Correlation matrix
+## Correlation matrix
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
 import seaborn as sns
@@ -118,7 +119,7 @@ plt.show()
 
 ```
 
-# Missing values
+## Missing values
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
 
@@ -133,7 +134,7 @@ train_complete_cases.to_csv('../data/train_compelete_cases.csv', index=False)
 
 ```
 
-# Missing values imputation
+## Missing values imputation
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
 from sklearn.ensemble import RandomForestClassifier
@@ -156,23 +157,46 @@ train_imputed.to_csv('../data/train_imputed.csv', index=False)
 
 ```
 
-# PCI
+## Dimentionality reduction
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
+# use complete-case data
+train = pd.read_csv('../data/train_complete_cases.csv')
+
 # scale data to have mean=0 and sd=1
 scaler = StandardScaler(with_std=True, with_mean=True)
-train_imputed_reduced = train_imputed.iloc[:, 1:]
-train_imputed_scaled = scaler.fit_transform(train_imputed_reduced)
+train_reduced = train.iloc[:, 2:]
+train_scaled = scaler.fit_transform(train_reduced)
 
 # perform pca
-pca = PCA(n_components=3)
-train_imputed_pca = pca.fit_transform(train_imputed_scaled)
-pca_df = pd.DataFrame(data=train_imputed_pca, columns=['PC1', 'PC2', 'PC3'])
+pca = PCA()
+pca_fit = pca.fit_transform(train_scaled)
+#pca_df = pd.DataFrame(data=train_imputed_pca, columns=['PC1', 'PC2', 'PC3'])
 
-pca.explained_variance_ratio_
+# calculate proportion of variance explained (PVE)
+pve = pca.explained_variance_ratio_
+pve
+pve_cum = np.cumsum(pve)
+pve_cum
+
+# scree plot for pve
+plt.figure(figsize=(10, 6))
+plt.plot(range(1, len(pve) + 1), pve, marker='o', linestyle='--') 
+plt.title('Scree Plot') 
+plt.xlabel('Principal Component') 
+plt.ylabel('Probability of Variance Explained') 
+plt.show()
+
+# scree plot for cumulative pve
+plt.figure(figsize=(10, 6))
+plt.plot(range(1, len(pve_cum) + 1), pve_cum, marker='o', linestyle='--') 
+plt.title('Scree Plot') 
+plt.xlabel('Principal Component') 
+plt.ylabel('Cumulative Probability of Variance Explained') 
+plt.show()
 
 ```
 
@@ -190,8 +214,7 @@ Regarding missing values, 210 NaNs are observed in the dataset, all within 'pare
 
 For further analysis and modeling, I stored three versions of the train data: the first is 'train_transformed' where 'parentspecies' is encoded and converted to numerical variable; the second is 'train_complete_cases' obtained by deleting rows with missing values (210 rows); and the third is 'train_imputed' where missing values are replaced with predictions from the Random Forest classifier. To ensure the best predictions for our project, we can use all three datasets and compare their performances. It is worth mentioning that some regressors do not accept missing values in the data at all, so we might need to use either 'train_complete_cases' or 'train_imputed' at some point.
 
-I also performed a preliminary PCA, an unsupervised machine learning method, to further explore patterns in the data. Since PCA does not work on data with NaNs, I used the 'train_imputed' data for this task. Specifying 3 principal components, the results show that PC1, PC2, and PC3 explain 16%, 12%, and 10% of the variance in the data, respectively. The PCA analysis will be completed by the next team meeting.
-
+I performed a preliminary PCA, an unsupervised machine learning method, to further explore patterns in the data and use the results for feature selection. Since PCA does not accept missing values, I used the 'train_complete_cases' data for this task. Initially, I ran PCA without specifying the number of components. Then, I calculated the Proportion of Variance Explained (PVE) by each component, as well as the cumulative PVE, and plotted the results using a scree plot. The PVE plot shows that, firstly, there is no significant pattern within the data. Secondly, the last four components do not explain any additional variance, allowing us to confidently exclude them in the process of dimensionality reduction.The implications of PCA for feature selection will be further explored during the modeling process.
 
 
 
