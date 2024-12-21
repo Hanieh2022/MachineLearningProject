@@ -27,7 +27,9 @@ from sklearn.model_selection import cross_val_score, KFold
 
 
 # read complete-case train data
-train = pd.read_csv('../data/train_complete_cases.csv')
+train = pd.read_csv('../data/train.csv')
+
+train = train.drop(columns='parentspecies')
 
 X_train = train.iloc[:, 2:]
 y_train = train['log_pSat_Pa']
@@ -52,7 +54,7 @@ print(min_mse * 0.01 + min_mse)
 
 ```
 
-Based on the table, the lowest MSE correspond to k=17 with MSE 5.151. Considering 1% margin of error, a safer number of k is 10 with MSE 5.195.  
+Based on the table, the lowest MSE correspond to k=18 with MSE 5.167. Considering 1% margin of error, the optimal number of k is 10 with MSE 5.216.  
 
 # KNN model improvement
 
@@ -83,9 +85,10 @@ print(min_mse * 0.01 + min_mse)
 
 
 ```
-Based on the table, we see that scaled data achieves lower overall MSE. The lowest MSE which is 3.0690 corresponds to k=15. Considering 1% margin of error, the next best number of k is 10 with MSE 3.099. 
+Based on the table, we see that scaled data achieves lower overall MSE. The lowest MSE which is 3.093 corresponds to k=17. Considering 1% margin of error, the optimal number of k is 10 with MSE 3.1210. 
 
 The optimal number of k=10 aligns with the result obtained from unscaled data; however, the scaled data achieved a significantly lower MSE.
+
 
 ## Dimentionality reduction (PCA)
 
@@ -116,6 +119,36 @@ print(min_mse * 0.01 + min_mse)
 
 ```
 
-As indicated by the table, the dimensionality with minimum MSE is 9 with MSE 3.057. Considering 1% margin of error, the optimal dimensionality is 8 with MSE 3.087. 
+As indicated by the table, the dimensionality with minimum MSE is 9 with MSE 3.088. Considering 1% margin of error, the optimal dimensionality is 8 with MSE 3.108. 
 
 In conclusion, we have achieved the best performance so far with the model using scaled data, k=10, and pc=8.
+
+```{python}
+
+train = train[['ID', 'log_pSat_Pa', 'MW', 'NumOfAtoms', 'NumOfO', 'NumOfC', 'NumOfConf', 'NumOfConfUsed', 'NumHBondDonors', 'hydroxyl (alkyl)', 'NumOfN', 'carboxylic acid', 'carbonylperoxynitrate', 'hydroperoxide', 'nitroester', 'carbonylperoxyacid']]
+
+X_train = train.iloc[:, 2:]
+y_train = train['log_pSat_Pa']
+
+X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns) 
+
+mses = []
+ks = range(1, X_train_scaled.shape[1] + 1)
+for k in ks : 
+  model = KNeighborsRegressor(n_neighbors=k) 
+  kf = KFold(n_splits=10, shuffle=True, random_state=100) 
+  fold_scores = -cross_val_score(model, X_train_scaled, y_train, cv=kf, scoring='neg_mean_squared_error') 
+  mse = round(fold_scores.mean(), 4)
+  mses.append(mse)
+
+result = pd.DataFrame({'k': ks, 'MSE': mses}) 
+print (result)    
+
+# find the lowest MSE and MSE with 1% margin of error
+min_mse = result['MSE'].min()
+print(min_mse)
+print(min_mse * 0.01 + min_mse)
+
+
+
+```
