@@ -62,6 +62,20 @@ combined['parentspecies'].value_counts()
 combined_imputed['parentspecies'].value_counts()
 
 
+# evaluate the accuracy of classification
+train_data, validation_data = train_test_split(non_missing_data, test_size=0.3, random_state=42)
+imputer2 = RandomForestClassifier(n_estimators=500, random_state=100) 
+imputer2.fit(train_data.iloc[:, 1:], train_data['parentspecies']) 
+
+# Predict the 'parentspecies' for the validation set 
+validation_predictions = imputer2.predict(validation_data.iloc[:, 1:]) 
+
+# Calculate the accuracy of the predictions 
+accuracy = accuracy_score(validation_data['parentspecies'], validation_predictions) 
+
+print(f"Accuracy of imputation: {accuracy:.2f}")
+
+
 combined_imputed['parentspecies'] = combined_imputed['parentspecies'].astype(str)
 
 mapping_dictionary = {
