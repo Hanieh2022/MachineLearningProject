@@ -9,6 +9,7 @@ toc: true
 knitr::opts_chunk$set(echo = TRUE)
 
 library(reticulate)
+#py_install("scipy")
 
 ```
 # Exploratory data analysis 
@@ -88,6 +89,8 @@ train['parentspecies'] = train['parentspecies'].map(mapping_dictionary)
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
 import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 plt.clf()
 train.iloc[:, 1:].hist(bins=30, figsize=(15, 10)) 
@@ -95,18 +98,12 @@ plt.title('Variables Distibution, Train set')
 plt.tight_layout() 
 plt.show()
 
-plt.clf()
-test.iloc[:, 1:].hist(bins=30, figsize=(15, 10)) 
-plt.title('Variables Distibution, Test set')
-plt.tight_layout() 
-plt.show()
   
 ```
 
 ## Correlation matrix
 
 ```{python, message=FALSE, error=FALSE, warning=FALSE}
-import seaborn as sns
 
 correlation_matrix = train.iloc[:, 1:].corr()
 correlation_matrix
@@ -230,5 +227,4 @@ anova_df = pd.DataFrame({'Feature': ['Feature' + str(i) for i in range(1, X.shap
 print(anova_df)
 
 ```
-
 
