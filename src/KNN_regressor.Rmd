@@ -125,7 +125,7 @@ In conclusion, we have achieved the best performance so far with the model using
 
 ```{python}
 
-train = train[['ID', 'log_pSat_Pa', 'MW', 'NumOfAtoms', 'NumOfO', 'NumOfC', 'NumOfConf', 'NumOfConfUsed', 'NumHBondDonors', 'hydroxyl (alkyl)', 'NumOfN', 'carboxylic acid', 'carbonylperoxynitrate', 'hydroperoxide', 'nitroester', 'carbonylperoxyacid']]
+train = train[['ID', 'log_pSat_Pa', 'MW', 'NumOfAtoms', 'NumOfO', 'NumOfC', 'NumOfConf', 'NumOfConfUsed', 'NumHBondDonors', 'hydroxyl (alkyl)', 'NumOfN', 'carboxylic acid', 'carbonylperoxynitrate', 'hydroperoxide', 'ketone', 'carbonylperoxyacid']]
 
 X_train = train.iloc[:, 2:]
 y_train = train['log_pSat_Pa']
@@ -148,7 +148,5 @@ print (result)
 min_mse = result['MSE'].min()
 print(min_mse)
 print(min_mse * 0.01 + min_mse)
-
-
 
 ```
