@@ -1,0 +1,146 @@
+---
+title: "Experiment: Imputation + one-hot encoding of 'parentspecious and box-cox transformation of 'NumOfConf'"
+date: "`r Sys.Date()`"
+output: pdf_document
+toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(reticulate)
+
+```
+
+# Combined train and test datasets
+
+```{python}
+import pandas as pd
+import numpy as np
+from scipy.stats import boxcox
+
+
+train = pd.read_csv('../data/train.csv')
+test = pd.read_csv('../data/test.csv')
+
+train_reduced = train.drop(columns='log_pSat_Pa')
+
+combined = pd.concat([train_reduced, test], ignore_index=True)
+
+# BoxCox transformation
+combined['NumOfConf_transformed'], fitted_lambda = boxcox(combined['NumOfConf'])
+combined = combined.drop(columns='NumOfConf')
+
+
+# encode 'parentspecies' from string to int
+train['parentspecies'].unique()
+
+mapping_dictionary = {
+'toluene' : 1,
+'apin' : 2,
+'decane' : 3,
+'apin_toluene' : 4,
+'apin_decane' : 5,
+'decane_toluene' : 6,
+'apin_decane_toluene' : 7
+}
+
+combined['parentspecies'] = combined['parentspecies'].map(mapping_dictionary)
+
+```
+
+# Imputation
+
+```{python}
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+# impute missing values of 'parentspecies' using RF
+non_missing_data = combined[combined['parentspecies'].notna()] 
+missing_data = combined[combined['parentspecies'].isna()]
+
+imputer = RandomForestClassifier(n_estimators=500, random_state=100) 
+imputer.fit(non_missing_data.iloc[:, 1:], non_missing_data['parentspecies'])
+predictions = imputer.predict(missing_data.iloc[:, 1:]) 
+combined_imputed = combined.copy()
+combined_imputed.loc[combined_imputed['parentspecies'].isna(), 'parentspecies'] = predictions
+
+combined['parentspecies'].value_counts()
+combined_imputed['parentspecies'].value_counts()
+
+
+# evaluate the accuracy of classification
+train_data, validation_data = train_test_split(non_missing_data, test_size=0.3, random_state=42)
+imputer2 = RandomForestClassifier(n_estimators=500, random_state=100) 
+imputer2.fit(train_data.iloc[:, 1:], train_data['parentspecies']) 
+
+# Predict the 'parentspecies' for the validation set 
+validation_predictions = imputer2.predict(validation_data.iloc[:, 1:]) 
+
+# Calculate the accuracy of the predictions 
+accuracy = accuracy_score(validation_data['parentspecies'], validation_predictions) 
+
+print(f"Accuracy of imputation: {accuracy:.2f}")
+
+
+combined_imputed['parentspecies'] = combined_imputed['parentspecies'].astype(str)
+
+mapping_dictionary = {
+'1.0' : 'toluene',
+'2.0' : 'apin',
+'3.0' : 'decane',
+'4.0' : 'apin_toluene',
+'5.0' : 'apin_decane',
+'6.0' : 'decane_toluene',
+'7.0' : 'apin_decane_toluene'
+}
+
+combined_imputed['parentspecies'] = combined_imputed['parentspecies'].map(mapping_dictionary)
+
+```
+
+# One-hot encoding
+
+```{python}
+
+combined_imputed['toluene'] = 1
+combined_imputed['apin'] = 1
+combined_imputed['decane'] = 1
+
+combined_imputed['toluene'] = ((combined_imputed['parentspecies'] == 'toluene')
+                    | (combined_imputed['parentspecies'] == 'apin_toluene')
+                    | (combined_imputed['parentspecies'] == 'decane_toluene')
+                    | (combined_imputed['parentspecies'] == 'apin_decane_toluene')).astype(int)
+
+
+combined_imputed['apin'] = ((combined_imputed['parentspecies'] == 'apin') 
+                    | (combined_imputed['parentspecies'] == 'apin_toluene')
+                    | (combined_imputed['parentspecies'] == 'apin_decane')
+                    | (combined_imputed['parentspecies'] == 'apin_decane_toluene')).astype(int)
+
+
+combined_imputed['decane'] = ((combined_imputed['parentspecies'] == 'decane') 
+                    | (combined_imputed['parentspecies'] == 'apin_decane')
+                    | (combined_imputed['parentspecies'] == 'decane_toluene')
+                    | (combined_imputed['parentspecies'] == 'apin_decane_toluene')).astype(int)
+
+
+combined_imputed = combined_imputed.drop(columns='parentspecies')
+
+
+# extract train set from combined data
+train_extracted = combined_imputed[:26637]
+
+position = 1
+train_extracted.insert(position, 'log_pSat_Pa', train['log_pSat_Pa'])
+
+train_extracted.to_csv('../data/train_imputed_onehot_boxcox.csv', index=False)
+
+
+# extract test set from combined data
+test_extracted = combined_imputed[26637:]
+
+test_extracted.to_csv('../data/test_imputed_onehot_boxcox.csv', index=False)
+
+```
